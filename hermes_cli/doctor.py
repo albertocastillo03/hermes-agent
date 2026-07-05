@@ -812,6 +812,21 @@ def run_doctor(args):
                 catalog_provider = provider_def.id if provider_def is not None else None
                 if catalog_provider is not None:
                     provider_ids_to_accept.add(catalog_provider)
+                elif _normalize_catalog_provider is not None:
+                    # resolve_provider_full() returns None for aliases that
+                    # normalize to a non-cataloged sentinel provider (e.g.
+                    # "ollama" -> "custom", "vllm"/"llamacpp" -> "local") —
+                    # "custom" and "local" are deliberately absent from
+                    # models.dev/overlays, so None here does not mean the
+                    # provider is unrecognized. Accept it exactly like the
+                    # literal "custom" string is already accepted above.
+                    try:
+                        normalized = _normalize_catalog_provider(provider)
+                    except Exception:
+                        normalized = None
+                    if normalized in {"auto", "custom", "local"}:
+                        catalog_provider = normalized
+                        provider_ids_to_accept.add(normalized)
 
             if provider and provider != "auto":
                 if catalog_provider is None or (
