@@ -690,7 +690,7 @@ def _commercial_row(p: Dict[str, Any]) -> List[Any]:
         "company_size_band", ""
     )
     return [
-        "",                                                   # Accion (manual notes)
+        p.get("accion", ""),                                  # Accion (blank unless preserved from input)
         p.get("full_name", ""),                               # Contact name
         p.get("mobile", ""),                                  # Mobile
         p.get("mobile_2", ""),                                # Mobile 2
