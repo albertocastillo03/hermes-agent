@@ -112,9 +112,82 @@ role `IT Director`. Titles are pluralized correctly in the generated copy
 }
 ```
 
+## Excel Analyst — local commercial calling-list `.xlsx` export
+
+The Excel Analyst exports the dry-run prospects to a **real, local** Excel
+workbook shaped like the actual prospecting/calling sheet (not the internal
+analytics view). `export_leads_xlsx(result)` takes the dict from `run_dry_run`
+and writes a genuinely valid, styled `.xlsx` you can open in Excel or
+LibreOffice.
+
+Still fully **dry-run and mock-only**: it reads the in-memory result and writes
+one local file. It does **not** contact Lusha/Apollo/Apify/LinkedIn/Gmail/
+Outlook/Google Calendar, send email, create calendar events, or access secrets.
+**Phone numbers and LinkedIn URLs are never invented** — unknown contact fields
+are left blank. The workbook is built with the **standard library only** (an
+`.xlsx` is a ZIP of XML parts) — no new dependency, matching how the repo already
+reads `.xlsx`.
+
+```python
+from tools.sales_prospector import run_dry_run, export_leads_xlsx
+
+result = run_dry_run({"company": "Indra", "sector": "IT consulting",
+                      "geography": "Spain",
+                      "campaign_goal": "book a meeting with IT decision makers"})
+meta = export_leads_xlsx(result)   # optional: export_dir=..., date_tag="YYYYMMDD"
+# meta == {
+#   "file_path": "/abs/.../exports/sales_prospector/leads_indra_9747b98c.xlsx",
+#   "row_count": 3,                       # contacts on the master sheet
+#   "dry_run": True,
+#   "created_by": "excel_analyst",
+#   "columns": [...12 commercial columns...],
+#   "sheets": ["Todos los contactos 20260105"],
+#   "main_sheet": "Todos los contactos 20260105",
+# }
+```
+
+### Columns (exact order)
+
+`Accion`, `Contact name`, `Mobile`, `Mobile 2`, `Company name`, `Job title`,
+`Work email`, `Work email 2`, `LinkedIn profile`, `Industry`, `Sub industry`,
+`Employees in LinkedIn`.
+
+The internal analytics fields (`rank`, `fit_score`, `dry_run`,
+`approval_status`) are **not** shown in the Excel — they remain available in the
+`run_dry_run` JSON result only.
+
+Mapping from a prospect: `Contact name` ← `full_name`, `Company name` ←
+`company`, `Job title` ← `title`, `Work email` ← `email`, `Industry` ←
+broad industry, `Sub industry` ← `sector`, `Employees in LinkedIn` ← mock size
+band. `Accion` is blank (reserved for manual call notes); `Mobile`, `Mobile 2`,
+`Work email 2`, `LinkedIn profile` are blank in dry-run unless a real pipeline
+supplies them (LinkedIn stays a plain URL string).
+
+### Sheets and formatting
+
+- **Main sheet** — `Todos los contactos <YYYYMMDD>`. The date tag is
+  deterministic (derived from the pipeline's fixed anchor date → `20260105`);
+  pass `date_tag=` to override.
+- **Owner split** — if prospects carry an `owner`/`operator` field, one sheet per
+  owner is added (`<owner> - <YYYYMMDD>`, e.g. `David - 20260105`) while the
+  master sheet keeps every contact. With no owner field, only the master sheet is
+  created.
+- **Header row** — blue fill `#0070C0`, white bold text, centered + wrapped, tall
+  row, and **frozen** so it stays visible while scrolling. Columns have sensible
+  widths.
+- **Output folder** — defaults to `./exports/sales_prospector/` (git-ignored;
+  exports are local artifacts).
+- **Filename** — deterministic, derived from the company and sheet content (no
+  wall clock), so identical input produces a byte-identical file.
+
+The export is a **separate function** from `run_dry_run`; the pipeline itself
+performs no file I/O and remains deterministic.
+
 ## Tests
 
 - [`tests/tools/test_sales_prospector.py`](../tests/tools/test_sales_prospector.py)
   — determinism, mock-only/no-side-effects, Cerberus approval contract.
+- [`tests/tools/test_sales_prospector_export.py`](../tests/tools/test_sales_prospector_export.py)
+  — `.xlsx` export: columns, metadata, valid-workbook round-trip, determinism.
 - [`tests/gateway/test_api_server_sales_prospector.py`](../tests/gateway/test_api_server_sales_prospector.py)
   — endpoint auth, validation, and dry-run contract.

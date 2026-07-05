@@ -143,3 +143,7 @@ apps/desktop/demo/
 # PR body is the archive. See the hermes-agent-dev skill's
 # pr-infographic-workflow reference (storage rule + lapse #8 / #COMMIT-1).
 infographic/
+
+# Local Sales Prospector dry-run lead-list exports (.xlsx) — generated
+# artifacts, never committed. See docs/sales-prospector-dry-run.md.
+exports/
