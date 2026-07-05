@@ -6,6 +6,7 @@ boundary. The pipeline's own guarantees live in tests/tools/test_sales_prospecto
 """
 
 import json
+import os
 
 import pytest
 from aiohttp import web
@@ -17,6 +18,7 @@ from gateway.platforms.api_server import (
     cors_middleware,
     security_headers_middleware,
 )
+from tools.sales_prospector import EXPORT_COLUMNS
 
 ROUTE = "/v1/sales/prospect/dry-run"
 
@@ -123,3 +125,121 @@ class TestDryRunEndpoint:
             resp = await cli.post(ROUTE, json={},
                                   headers={"Authorization": "Bearer sk-secret"})
             assert resp.status == 200
+
+
+def _export_payload(**extra):
+    return {
+        "company": "Indra",
+        "sector": "IT consulting",
+        "geography": "Spain",
+        "campaign_goal": "book a meeting with IT decision makers",
+        "count": 3,
+        **extra,
+    }
+
+
+class TestDryRunExportEndpoint:
+    """POST /v1/sales/prospect/dry-run with the optional export_xlsx flag."""
+
+    @pytest.mark.asyncio
+    async def test_export_omitted_keeps_old_shape(self, adapter):
+        app = _make_app(adapter)
+        async with TestClient(TestServer(app)) as cli:
+            data = await (await cli.post(ROUTE, json=_export_payload())).json()
+            assert "export" not in data          # unchanged default response
+            assert data["dry_run"] is True
+            assert data["mock_only"] is True
+
+    @pytest.mark.asyncio
+    async def test_export_false_keeps_old_shape(self, adapter):
+        app = _make_app(adapter)
+        async with TestClient(TestServer(app)) as cli:
+            data = await (
+                await cli.post(ROUTE, json=_export_payload(export_xlsx=False))
+            ).json()
+            assert "export" not in data
+            assert data["dry_run"] is True
+            assert data["mock_only"] is True
+
+    @pytest.mark.asyncio
+    async def test_export_true_includes_metadata_and_file(
+        self, adapter, tmp_path, monkeypatch
+    ):
+        # Redirect the export folder to a temp dir (order-independent, no cwd
+        # mutation) so nothing lands in the repo tree regardless of test order.
+        monkeypatch.setattr(
+            "tools.sales_prospector.DEFAULT_EXPORT_DIR", str(tmp_path)
+        )
+        app = _make_app(adapter)
+        async with TestClient(TestServer(app)) as cli:
+            resp = await cli.post(ROUTE, json=_export_payload(export_xlsx=True))
+            assert resp.status == 200
+            data = await resp.json()
+
+            # Core dry-run guarantees intact.
+            assert data["dry_run"] is True
+            assert data["mock_only"] is True
+
+            export = data["export"]
+            for key in (
+                "file_path", "row_count", "dry_run", "created_by",
+                "columns", "sheets", "main_sheet",
+            ):
+                assert key in export
+            assert export["dry_run"] is True
+            assert export["created_by"] == "excel_analyst"
+            assert export["row_count"] == 3
+            assert export["columns"] == EXPORT_COLUMNS
+            assert export["main_sheet"] in export["sheets"]
+
+            # The generated file actually exists locally.
+            assert os.path.isfile(export["file_path"])
+            assert export["file_path"].endswith(".xlsx")
+
+    @pytest.mark.asyncio
+    async def test_export_true_requires_auth(self, auth_adapter):
+        app = _make_app(auth_adapter)
+        async with TestClient(TestServer(app)) as cli:
+            resp = await cli.post(ROUTE, json=_export_payload(export_xlsx=True))
+            assert resp.status == 401
+
+    @pytest.mark.asyncio
+    async def test_export_true_with_valid_auth(self, auth_adapter, tmp_path, monkeypatch):
+        monkeypatch.setattr(
+            "tools.sales_prospector.DEFAULT_EXPORT_DIR", str(tmp_path)
+        )
+        app = _make_app(auth_adapter)
+        async with TestClient(TestServer(app)) as cli:
+            resp = await cli.post(
+                ROUTE,
+                json=_export_payload(export_xlsx=True),
+                headers={"Authorization": "Bearer sk-secret"},
+            )
+            assert resp.status == 200
+            data = await resp.json()
+            assert os.path.isfile(data["export"]["file_path"])
+
+    @pytest.mark.asyncio
+    async def test_export_invalid_json_returns_400(self, adapter):
+        app = _make_app(adapter)
+        async with TestClient(TestServer(app)) as cli:
+            resp = await cli.post(ROUTE, data="not json",
+                                  headers={"Content-Type": "application/json"})
+            assert resp.status == 400
+
+    @pytest.mark.asyncio
+    async def test_no_raw_bytes_in_response(self, adapter, tmp_path, monkeypatch):
+        """Only metadata is returned — never the workbook bytes."""
+        monkeypatch.setattr(
+            "tools.sales_prospector.DEFAULT_EXPORT_DIR", str(tmp_path)
+        )
+        app = _make_app(adapter)
+        async with TestClient(TestServer(app)) as cli:
+            resp = await cli.post(ROUTE, json=_export_payload(export_xlsx=True))
+            # Response is JSON, not an octet-stream file download.
+            assert resp.content_type == "application/json"
+            data = await resp.json()
+            assert set(data["export"].keys()) == {
+                "file_path", "row_count", "dry_run", "created_by",
+                "columns", "sheets", "main_sheet",
+            }

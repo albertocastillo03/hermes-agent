@@ -1624,7 +1624,17 @@ class APIServerAdapter(BasePlatformAdapter):
         workflow lives in ``tools/sales_prospector.py``; this handler is a thin
         transport wrapper.
 
-        Request body (all optional): ``{"industry", "role", "location", "count"}``.
+        Request body (all optional):
+          ``{"company", "sector", "geography", "campaign_goal", "count",
+             "export_xlsx"}``.
+
+        When ``export_xlsx`` is true, the commercial calling-list workbook is
+        also written locally (via ``export_leads_xlsx``) and its metadata is
+        attached under an ``"export"`` key: ``file_path``, ``row_count``,
+        ``dry_run``, ``created_by``, ``columns``, ``sheets``, ``main_sheet``.
+        Only metadata is returned — never the file bytes — and the file is
+        written only to the server's default export folder (no client-specified
+        path). When the flag is omitted/false the response shape is unchanged.
         """
         auth_err = self._check_auth(request)
         if auth_err:
@@ -1634,9 +1644,14 @@ class APIServerAdapter(BasePlatformAdapter):
         if err:
             return err
 
+        export_xlsx = _coerce_request_bool(body.get("export_xlsx"), default=False)
+
         try:
             from tools.sales_prospector import run_dry_run
             result = run_dry_run(body)
+            if export_xlsx:
+                from tools.sales_prospector import export_leads_xlsx
+                result["export"] = export_leads_xlsx(result)
         except Exception:
             logger.exception("POST /v1/sales/prospect/dry-run failed")
             return web.json_response(

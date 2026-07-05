@@ -76,12 +76,49 @@ curl -s http://localhost:8642/v1/sales/prospect/dry-run \
 | `geography` | string | `"Remote"` | Where prospects are located. |
 | `campaign_goal` | string | `"generate qualified leads"` | Outreach objective; the target job title is *derived* from it. |
 | `count` | int | `3` | Clamped to `1..25`. |
+| `export_xlsx` | bool | `false` | When true, also write the commercial `.xlsx` and return its metadata under `export`. |
 
 The input is preserved and echoed back under both `query` and `request_context`
 (never silently defaulted). The prospect job title is derived from
 `campaign_goal` — e.g. a goal mentioning "IT decision makers" yields the target
 role `IT Director`. Titles are pluralized correctly in the generated copy
 ("Head of Sales" → "Heads of Sales", never "Head of Saless").
+
+### Optional Excel export (`export_xlsx`)
+
+Pass `"export_xlsx": true` to also generate the commercial calling-list workbook
+(see the Excel Analyst section below) as part of the same request:
+
+```bash
+curl -s http://localhost:8642/v1/sales/prospect/dry-run \
+  -H "Authorization: Bearer $API_SERVER_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"company": "Indra", "sector": "IT consulting", "geography": "Spain", "campaign_goal": "book a meeting with IT decision makers", "export_xlsx": true}'
+```
+
+The response then includes an `export` block with the file metadata:
+
+```jsonc
+"export": {
+  "file_path": "/abs/.../exports/sales_prospector/leads_indra_9747b98c.xlsx",
+  "row_count": 3,
+  "dry_run": true,
+  "created_by": "excel_analyst",
+  "columns": [ "Accion", "...", "Employees in LinkedIn" ],
+  "sheets": [ "Todos los contactos 20260105" ],
+  "main_sheet": "Todos los contactos 20260105"
+}
+```
+
+Notes on the export flag:
+
+- **Default unchanged** — when `export_xlsx` is omitted or false, the response is
+  exactly as before (no `export` key).
+- **Metadata only** — the response returns the local `file_path`, never the file
+  bytes. There is intentionally **no download endpoint yet**.
+- **Server-side path only** — the file is written to the server's default export
+  folder (`./exports/sales_prospector/`); a client cannot choose the path.
+- Still fully dry-run / mock-only: no external service, email, or calendar.
 
 ### Response shape
 
