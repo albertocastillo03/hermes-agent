@@ -147,3 +147,7 @@ infographic/
 # Local Sales Prospector dry-run lead-list exports (.xlsx) — generated
 # artifacts, never committed. See docs/sales-prospector-dry-run.md.
 exports/
+
+# Local-only improvement proposals from the dry-run operator loop — never
+# committed. See docs/hermes/runtime/operator_dry_run_loop.md.
+improvement_proposals/
