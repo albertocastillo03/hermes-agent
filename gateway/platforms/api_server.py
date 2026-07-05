@@ -8,6 +8,7 @@ Exposes an HTTP server with endpoints:
 - DELETE /v1/responses/{response_id} — Delete a stored response
 - GET  /v1/models                  — lists hermes-agent and any configured model_routes aliases
 - GET  /v1/capabilities            — machine-readable API capabilities for external UIs
+- POST /v1/sales/prospect/dry-run  — deterministic mock-only sales prospecting dry-run (no external services)
 - GET  /api/sessions               — list client-visible Hermes sessions
 - POST /api/sessions               — create an empty Hermes session
 - GET/PATCH/DELETE /api/sessions/{session_id} — read/update/delete a session
@@ -1611,6 +1612,39 @@ class APIServerAdapter(BasePlatformAdapter):
             "platform": "api_server",
             "data": data,
         })
+
+    async def _handle_sales_prospect_dry_run(self, request: "web.Request") -> "web.Response":
+        """POST /v1/sales/prospect/dry-run — run the mock prospecting pipeline.
+
+        Runs the deterministic, local, mock-only Sales Prospector → Atlas →
+        Excel Analyst → Mercury → Kronos → Cerberus dry-run entirely
+        in-process. No external providers are contacted, no email is sent, and
+        no calendar event is created: side effects are returned as structured
+        ``approval_required`` actions under ``approvals_required``. The core
+        workflow lives in ``tools/sales_prospector.py``; this handler is a thin
+        transport wrapper.
+
+        Request body (all optional): ``{"industry", "role", "location", "count"}``.
+        """
+        auth_err = self._check_auth(request)
+        if auth_err:
+            return auth_err
+
+        body, err = await self._read_json_body(request)
+        if err:
+            return err
+
+        try:
+            from tools.sales_prospector import run_dry_run
+            result = run_dry_run(body)
+        except Exception:
+            logger.exception("POST /v1/sales/prospect/dry-run failed")
+            return web.json_response(
+                _openai_error("Sales prospector dry-run failed", err_type="server_error"),
+                status=500,
+            )
+
+        return web.json_response(result)
 
     # ------------------------------------------------------------------
     # /api/sessions — thin client/session resource API
@@ -4764,6 +4798,7 @@ class APIServerAdapter(BasePlatformAdapter):
             self._app.router.add_get("/v1/capabilities", self._handle_capabilities)
             self._app.router.add_get("/v1/skills", self._handle_skills)
             self._app.router.add_get("/v1/toolsets", self._handle_toolsets)
+            self._app.router.add_post("/v1/sales/prospect/dry-run", self._handle_sales_prospect_dry_run)
             # Session/client control surface (thin wrappers over SessionDB + _run_agent)
             self._app.router.add_get("/api/sessions", self._handle_list_sessions)
             self._app.router.add_post("/api/sessions", self._handle_create_session)
